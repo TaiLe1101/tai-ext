@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Realtime AI Voiceover",
+  "version": "1.0",
+  "description": "Lồng tiếng video YouTube tự động bằng Local NestJS + Colab",
+  "permissions": ["storage"],
+  "host_permissions": ["*://www.youtube.com/*", "http://localhost:3000/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://www.youtube.com/*"],
+      "js": ["content.js"],
+      "css": ["style.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

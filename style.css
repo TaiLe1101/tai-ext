@@ -1,0 +1,43 @@
+.yt-voiceover-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 44px !important;
+  height: 100% !important;
+  min-height: 48px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  color: #fff !important;
+  cursor: pointer !important;
+  outline: none !important;
+  box-sizing: border-box !important;
+  vertical-align: middle !important;
+  transition:
+    opacity 0.2s ease,
+    transform 0.15s ease;
+}
+
+.yt-voiceover-btn:hover {
+  opacity: 0.85;
+  transform: scale(1.08);
+}
+
+.yt-voiceover-btn svg {
+  width: 22px !important;
+  height: 22px !important;
+  display: block !important;
+  fill: currentColor !important;
+}
+
+/* Hiệu ứng xoay tròn khi đang load/đệm */
+.yt-voiceover-spin {
+  animation: ytVoSpin 1s linear infinite;
+}
+
+@keyframes ytVoSpin {
+  100% {
+    transform: rotate(360deg);
+  }
+}

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube Realtime AI Voiceover",
-  "version": "1.1",
+  "version": "1.2",
   "description": "Lồng tiếng YouTube bằng TAI Desktop và AI worker, có cache trên máy.",
   "permissions": ["storage", "scripting"],
   "host_permissions": ["https://www.youtube.com/*", "http://127.0.0.1:3000/*"],

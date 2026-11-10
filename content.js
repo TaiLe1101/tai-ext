@@ -115,7 +115,8 @@ async function start() {
   try {
     // A cached video should start without waiting for YouTube caption requests.
     const cached = await request("FETCH_CHUNKS", { videoId: id, fromTime: 0 });
-    const subtitles = cached.chunks?.length ? null : await request("FETCH_CAPTIONS", { videoId: id }).catch(() => null);
+    if (token !== session || id !== getVideoId()) return;
+    const subtitles = cached.hasSubtitles || cached.chunks?.length ? null : await request("FETCH_CAPTIONS", { videoId: id });
     if (token !== session || id !== getVideoId()) return;
     await request("START_VOICEOVER", { videoId: id, subtitles });
     const deadline = Date.now() + 45000;

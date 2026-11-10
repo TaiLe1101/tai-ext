@@ -1,283 +1,158 @@
-const NEST_BASE_URL = "http://localhost:3000";
-
-let chunkBuffer = [];
-let audioPool = new Map();
-let currentPlayingId = null;
-let activeAudio = null;
-let originalVideo = null;
-let isVoiceoverEnabled = false;
-let pollingTimer = null;
-
-// Bộ SVG icon chuẩn style YouTube player
+const DESKTOP_URL = "http://127.0.0.1:3000";
 const ICONS = {
-  idle: `
-    <svg viewBox="0 0 24 24">
-      <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
-      <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
-    </svg>
-  `,
-  loading: `
-    <svg class="yt-voiceover-spin" viewBox="0 0 24 24">
-      <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 004 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
-    </svg>
-  `,
-  playing: `
-    <svg viewBox="0 0 24 24" style="fill: #3ea6ff;">
-      <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
-    </svg>
-  `,
-  error: `
-    <svg viewBox="0 0 24 24" style="fill: #ff4e45;">
-      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
-    </svg>
-  `
+  idle: '<svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zM5 11h2a5 5 0 0 0 10 0h2a7 7 0 0 1-6 6.92V21h-2v-3.08A7 7 0 0 1 5 11z"/></svg>',
+  loading: '<svg class="yt-voiceover-spin" viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/></svg>',
+  playing: '<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm11-5v2a6 6 0 0 1 0 12v2a8 8 0 0 0 0-16z"/></svg>',
+  error: '<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>'
 };
-
-function getVideoId() {
-  return new URLSearchParams(window.location.search).get("v");
+let session = 0;
+let enabled = false;
+let loading = false;
+let currentId = null;
+let activeAudio = null;
+let video = null;
+let savedVolume = 1;
+let chunks = [];
+let pool = new Map();
+let listeners = null;
+let polling = null;
+let pageVideoId = getVideoId();
+function getVideoId() { return new URLSearchParams(location.search).get("v"); }
+function buttonState(state, title) {
+  const button = document.getElementById("btn-yt-voiceover");
+  if (button) { button.innerHTML = ICONS[state]; button.title = title; button.setAttribute("aria-label", title); }
 }
-
-function preloadUpcomingAudio(currentTime) {
-  const upcomingChunks = chunkBuffer.filter(
-    (c) => c.start >= currentTime && c.start <= currentTime + 8
-  );
-
-  for (const chunk of upcomingChunks) {
-    if (!audioPool.has(chunk.id)) {
-      const audio = new Audio(`${NEST_BASE_URL}${chunk.audioUrl}`);
-      audio.preload = "auto";
-      audioPool.set(chunk.id, audio);
+async function request(action, payload) {
+  const response = await chrome.runtime.sendMessage({ action, payload });
+  if (!response?.success) throw new Error(response?.error || "Extension mất kết nối. Hãy tải lại trang YouTube.");
+  return response.data;
+}
+function stop() {
+  session++;
+  enabled = loading = false;
+  clearTimeout(polling);
+  listeners?.abort();
+  listeners = null;
+  for (const audio of pool.values()) { audio.pause(); audio.removeAttribute("src"); audio.load(); }
+  pool.clear();
+  activeAudio = null;
+  currentId = null;
+  chunks = [];
+  if (video) video.volume = savedVolume;
+  video = null;
+  buttonState("idle", "Bật lồng tiếng AI tiếng Việt (tua về đầu)");
+}
+function audioFor(chunk) {
+  if (!pool.has(chunk.id)) {
+    const audio = new Audio(`${DESKTOP_URL}${chunk.audioUrl}`);
+    audio.preload = "auto";
+    audio.onerror = () => {
+      if (enabled) { stop(); buttonState("error", "Không tải được âm thanh. Kiểm tra TAI Desktop và quyền truy cập mạng cục bộ của Chrome."); }
+    };
+    pool.set(chunk.id, audio);
+  }
+  return pool.get(chunk.id);
+}
+function syncAudio() {
+  if (!enabled || !video) return;
+  const now = video.currentTime;
+  for (const chunk of chunks) if (chunk.end > now && chunk.start <= now + 8) audioFor(chunk);
+  for (const [id, audio] of pool) {
+    const chunk = chunks.find(c => c.id === id);
+    if (chunk && (chunk.end < now - 15 || chunk.start > now + 20) && audio !== activeAudio) {
+      audio.pause(); audio.removeAttribute("src"); audio.load(); pool.delete(id);
     }
   }
+  const chunk = chunks.find(c => now >= c.start && now < c.end);
+  if (!chunk) {
+    activeAudio?.pause(); activeAudio = null; currentId = null;
+    video.volume = savedVolume;
+    return;
+  }
+  const audio = audioFor(chunk);
+  if (currentId !== chunk.id) { activeAudio?.pause(); activeAudio = audio; currentId = chunk.id; }
+  const play = () => {
+    if (!enabled || activeAudio !== audio || !video) return;
+    if (video.currentTime < chunk.start || video.currentTime >= chunk.end) return;
+    const speed = Math.min(1.65, Math.max(1, audio.duration / (chunk.end - chunk.start) || 1));
+    const offset = (video.currentTime - chunk.start) * speed;
+    audio.playbackRate = Math.min(4, speed * video.playbackRate);
+    if (Math.abs(audio.currentTime - offset) > 0.35 && offset < audio.duration) audio.currentTime = offset;
+    audio.muted = video.muted;
+    if (!video.paused && offset < audio.duration && audio.paused) {
+      void audio.play().then(() => { if (enabled && activeAudio === audio && video) video.volume = savedVolume * 0.15; }).catch(() => {});
+    }
+  };
+  if (audio.readyState >= 1) play();
+  else audio.onloadedmetadata = play;
 }
-
-async function fetchClientCaptions() {
+async function fetchChunks(id, token) {
+  const data = await request("FETCH_CHUNKS", { videoId: id, fromTime: video?.currentTime || 0 });
+  if (token !== session || id !== getVideoId()) return null;
+  if (data.status === "ERROR") throw new Error(data.error || "AI worker xử lý thất bại. Bấm lại để thử tiếp các đoạn còn thiếu.");
+  for (const chunk of data.chunks || []) if (!chunks.some(c => c.id === chunk.id)) chunks.push(chunk);
+  chunks.sort((a, b) => a.start - b.start);
+  return data;
+}
+async function poll(id, token) {
+  if (token !== session || !enabled) return;
+  try { await fetchChunks(id, token); if (token === session) syncAudio(); }
+  catch (error) { if (token === session) { stop(); buttonState("error", error.message); } return; }
+  if (token === session) polling = setTimeout(() => { void poll(id, token); }, 1500);
+}
+async function start() {
+  if (enabled || loading) { stop(); return; }
+  stop();
+  const id = getVideoId();
+  const token = session;
+  video = document.querySelector("video");
+  if (!id || !video) return;
+  savedVolume = video.volume;
+  loading = true;
+  video.pause();
+  video.currentTime = 0;
+  buttonState("loading", "Đang lấy phụ đề và chuẩn bị giọng đọc… Bấm để hủy.");
   try {
-    const player = document.querySelector("#movie_player");
-    const playerResponse = player?.getPlayerResponse
-      ? player.getPlayerResponse()
-      : window.ytInitialPlayerResponse;
-    const tracks =
-      playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-
-    if (!tracks || tracks.length === 0) return null;
-
-    const selectedTrack =
-      tracks.find((t) => t.languageCode.startsWith("en")) || tracks[0];
-    const res = await fetch(selectedTrack.baseUrl + "&fmt=json3");
-    const data = await res.json();
-
-    const parsed = [];
-    for (const ev of data.events || []) {
-      if (!ev.segs || ev.tStartMs === undefined) continue;
-      const text = ev.segs
-        .map((s) => s.utf8 || "")
-        .join("")
-        .trim();
-      if (!text || text === "\n") continue;
-
-      const start = Number((ev.tStartMs / 1000).toFixed(2));
-      const duration = Number(((ev.dDurationMs || 2000) / 1000).toFixed(2));
-      parsed.push({ start, end: Number((start + duration).toFixed(2)), text });
+    // A cached video should start without waiting for YouTube caption requests.
+    const cached = await request("FETCH_CHUNKS", { videoId: id, fromTime: 0 });
+    const subtitles = cached.chunks?.length ? null : await request("FETCH_CAPTIONS", { videoId: id }).catch(() => null);
+    if (token !== session || id !== getVideoId()) return;
+    await request("START_VOICEOVER", { videoId: id, subtitles });
+    const deadline = Date.now() + 45000;
+    while (token === session && id === getVideoId()) {
+      const data = await fetchChunks(id, token);
+      if (!data) return;
+      if (chunks.length) break;
+      if (Date.now() > deadline) throw new Error("Chưa có âm thanh sau 45 giây. Kiểm tra AI worker trong TAI Desktop rồi thử lại.");
+      await new Promise(resolve => setTimeout(resolve, 800));
     }
-    return parsed;
-  } catch (err) {
-    console.error("Lỗi lấy caption:", err);
-    return null;
-  }
+    if (token !== session || !video) return;
+    loading = false;
+    enabled = true;
+    listeners = new AbortController();
+    for (const event of ["timeupdate", "play", "ratechange", "seeked"]) video.addEventListener(event, syncAudio, { signal: listeners.signal });
+    video.addEventListener("pause", () => activeAudio?.pause(), { signal: listeners.signal });
+    video.addEventListener("seeking", () => { activeAudio?.pause(); currentId = null; if (video) video.volume = savedVolume; }, { signal: listeners.signal });
+    buttonState("playing", "Đang lồng tiếng AI · Bấm để tắt");
+    await video.play();
+    void poll(id, token);
+  } catch (error) { if (token === session) { stop(); buttonState("error", error.message); } }
 }
-
-function setupAudioController() {
-  originalVideo = document.querySelector("video");
-  if (!originalVideo) return;
-
-  originalVideo.addEventListener("pause", () => {
-    if (activeAudio && !activeAudio.paused) activeAudio.pause();
-  });
-
-  originalVideo.addEventListener("play", () => {
-    if (isVoiceoverEnabled && activeAudio && activeAudio.paused && currentPlayingId !== null) {
-      activeAudio.play().catch(() => {});
-    }
-  });
-
-  originalVideo.addEventListener("seeking", () => {
-    if (activeAudio) {
-      activeAudio.pause();
-      activeAudio.currentTime = 0;
-    }
-    currentPlayingId = null;
-    originalVideo.volume = 1.0;
-    fetchChunks(originalVideo.currentTime);
-  });
-
-  originalVideo.addEventListener("timeupdate", () => {
-    if (!isVoiceoverEnabled || chunkBuffer.length === 0) return;
-
-    const currTime = originalVideo.currentTime;
-    preloadUpcomingAudio(currTime);
-
-    const activeChunk = chunkBuffer.find(
-      (c) => currTime >= c.start && currTime < c.end
-    );
-
-    if (activeChunk) {
-      if (currentPlayingId !== activeChunk.id) {
-        if (activeAudio) {
-          activeAudio.pause();
-          activeAudio.currentTime = 0;
-        }
-
-        currentPlayingId = activeChunk.id;
-
-        let audio = audioPool.get(activeChunk.id);
-        if (!audio) {
-          audio = new Audio(`${NEST_BASE_URL}${activeChunk.audioUrl}`);
-          audioPool.set(activeChunk.id, audio);
-        }
-        activeAudio = audio;
-
-        const timeOffset = Math.max(0, currTime - activeChunk.start);
-        const allowedDuration = activeChunk.end - activeChunk.start;
-
-        const playWithSync = () => {
-          if (activeAudio !== audio) return;
-
-          const rawAudioDuration = audio.duration;
-          if (rawAudioDuration && allowedDuration > 0) {
-            const neededSpeed = rawAudioDuration / allowedDuration;
-            audio.playbackRate = Math.min(1.65, Math.max(1.0, neededSpeed));
-          } else {
-            audio.playbackRate = 1.0;
-          }
-
-          audio.currentTime = timeOffset;
-          audio.play().catch(() => {});
-          originalVideo.volume = 0.15;
-        };
-
-        if (audio.readyState >= 1) {
-          playWithSync();
-        } else {
-          audio.onloadedmetadata = playWithSync;
-        }
-      }
-    } else {
-      if (activeAudio && !activeAudio.paused) {
-        activeAudio.pause();
-        activeAudio.currentTime = 0;
-      }
-      currentPlayingId = null;
-      originalVideo.volume = 1.0;
-    }
-  });
-}
-
-function fetchChunks(fromTime = 0) {
-  const videoId = getVideoId();
-  if (!videoId) return;
-
-  chrome.runtime.sendMessage(
-    {
-      action: "FETCH_CHUNKS",
-      payload: { videoId, fromTime },
-    },
-    (response) => {
-      if (response && response.success && response.data?.chunks) {
-        response.data.chunks.forEach((newChunk) => {
-          if (!chunkBuffer.some((c) => c.id === newChunk.id)) {
-            chunkBuffer.push(newChunk);
-          }
-        });
-        chunkBuffer.sort((a, b) => a.start - b.start);
-      }
-    }
-  );
-}
-
 function injectButton() {
   if (document.getElementById("btn-yt-voiceover")) return;
-
-  const rightControls = document.querySelector(".ytp-right-controls");
-  if (!rightControls) return;
-
-  const btn = document.createElement("button");
-  btn.id = "btn-yt-voiceover";
-  btn.className = "ytp-button yt-voiceover-btn";
-  btn.innerHTML = ICONS.idle;
-  btn.title = "Bật lồng tiếng AI tiếng Việt (Tua về 0s)";
-
-  btn.onclick = async () => {
-    const videoId = getVideoId();
-    if (!videoId) return;
-
-    originalVideo = document.querySelector("video");
-
-    // 1. Tua video về đầu 0s ngay khi click
-    if (originalVideo) {
-      originalVideo.currentTime = 0;
-      originalVideo.pause();
-    }
-
-    // Reset trạng thái audio cũ nếu đang chạy
-    if (activeAudio) {
-      activeAudio.pause();
-      activeAudio.currentTime = 0;
-    }
-    chunkBuffer = [];
-    audioPool.clear();
-    currentPlayingId = null;
-
-    btn.innerHTML = ICONS.loading;
-    btn.title = "Đang trích xuất phụ đề...";
-
-    const captions = await fetchClientCaptions();
-
-    btn.title = "Đang đệm âm thanh tiếng Việt...";
-
-    chrome.runtime.sendMessage(
-      {
-        action: "START_VOICEOVER",
-        payload: { videoId, subtitles: captions },
-      },
-      (response) => {
-        if (!response || !response.success) {
-          btn.innerHTML = ICONS.error;
-          btn.title = "Lỗi kết nối tới NestJS backend";
-          return;
-        }
-
-        if (response.data.status === "NO_SUBTITLES") {
-          btn.innerHTML = ICONS.error;
-          btn.title = "Video không có phụ đề";
-          return;
-        }
-
-        isVoiceoverEnabled = true;
-        btn.innerHTML = ICONS.playing;
-        btn.title = "Đang lồng tiếng AI";
-
-        setupAudioController();
-
-        // Kéo chunk từ mốc 0s và bắt đầu phát video
-        fetchChunks(0);
-        if (originalVideo) {
-          originalVideo.play().catch(() => {});
-        }
-
-        if (pollingTimer) clearInterval(pollingTimer);
-        pollingTimer = setInterval(() => {
-          if (originalVideo) fetchChunks(originalVideo.currentTime);
-        }, 3000);
-      }
-    );
-  };
-
-  rightControls.prepend(btn);
+  const controls = document.querySelector(".ytp-right-controls");
+  if (!controls) return;
+  const button = document.createElement("button");
+  button.id = "btn-yt-voiceover";
+  button.className = "ytp-button yt-voiceover-btn";
+  button.onclick = () => { void start(); };
+  controls.prepend(button);
+  buttonState("idle", "Bật lồng tiếng AI tiếng Việt (tua về đầu)");
 }
-
-setInterval(() => {
-  if (location.pathname === "/watch") {
-    injectButton();
-  }
-}, 1000);
+function navigation() {
+  const id = getVideoId();
+  if (id !== pageVideoId || location.pathname !== "/watch") { stop(); pageVideoId = id; }
+  if (location.pathname === "/watch") injectButton();
+}
+document.addEventListener("yt-navigate-finish", navigation);
+setInterval(navigation, 1000);

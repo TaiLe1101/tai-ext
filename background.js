@@ -53,7 +53,7 @@ async function loadCaptions(tabId, expectedVideoId) {
   const state = await captionState();
   const cached = state.entries[expectedVideoId];
   if (cached?.expiresAt > Date.now()) {
-    if (cached.error) throw new Error(cached.error);
+    if (cached.error) throw new Error(`${cached.error} ${waitMessage(cached.expiresAt)}`);
     return cached.subtitles;
   }
   const until = Math.max(state.blockedUntil, state.nextRequestAt);
@@ -79,7 +79,7 @@ async function loadCaptions(tabId, expectedVideoId) {
   if (url.protocol !== "https:" || url.hostname !== "www.youtube.com" || url.pathname !== "/api/timedtext") throw new Error("URL phụ đề không hợp lệ.");
   url.searchParams.set("fmt", "json3");
   state.nextRequestAt = Date.now() + REQUEST_GAP;
-  remember(state, expectedVideoId, { error: waitMessage(Date.now() + ERROR_COOLDOWN) }, ERROR_COOLDOWN);
+  remember(state, expectedVideoId, { error: 'Yêu cầu phụ đề trước chưa hoàn tất.' }, ERROR_COOLDOWN);
   await saveCaptionState(state);
   let response;
   try {
@@ -104,7 +104,7 @@ async function loadCaptions(tabId, expectedVideoId) {
     const backoff = limited ? Math.min(6 * 60 * 60 * 1000, 30 * 60 * 1000 * 2 ** Math.min(state.failures - 1, 4)) : ERROR_COOLDOWN;
     state.blockedUntil = Math.max(state.blockedUntil, Date.now() + backoff, retryAfterUntil(response?.headers.get("Retry-After")));
     const message = `${error.message} ${waitMessage(state.blockedUntil)}`;
-    remember(state, expectedVideoId, { error: message }, state.blockedUntil - Date.now());
+    remember(state, expectedVideoId, { error: error.message }, state.blockedUntil - Date.now());
     await saveCaptionState(state);
     throw new Error(message);
   }

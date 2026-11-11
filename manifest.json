@@ -1,9 +1,11 @@
 {
   "manifest_version": 3,
   "name": "YouTube Realtime AI Voiceover",
-  "version": "1.2",
+  "version": "2.0.0",
+  "minimum_chrome_version": "116",
   "description": "Lồng tiếng YouTube bằng TAI Desktop và AI worker, có cache trên máy.",
-  "permissions": ["storage", "scripting"],
+  "permissions": ["storage", "activeTab", "tabCapture", "offscreen"],
+  "action": { "default_popup": "popup.html", "default_title": "TAI — Thu audio và dịch" },
   "host_permissions": ["https://www.youtube.com/*", "http://127.0.0.1:3000/*"],
   "background": {
     "service_worker": "background.js"

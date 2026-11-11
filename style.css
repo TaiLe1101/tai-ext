@@ -41,3 +41,5 @@
     transform: rotate(360deg);
   }
 }
+
+#tai-capture-notice{position:absolute;top:16px;left:16px;right:16px;z-index:60;padding:14px 18px;border-radius:8px;background:rgba(16,21,30,.95);color:#e9eef8;font:14px/1.6 Arial,sans-serif;pointer-events:none}

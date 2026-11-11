@@ -1,0 +1,5 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><link rel="stylesheet" href="popup.css"></head><body>
+<h1>TAI Voiceover</h1><p>Audio của tab YouTube sẽ được gửi qua TAI Desktop tới worker bạn đã cấu hình để nhận diện và dịch.</p>
+<button id="prepare">Chuẩn bị bản dịch để xem đồng bộ</button><p class="hint">Video phát để thu audio, dừng khi xử lý. Lần đầu cần thời gian thu + dịch; các lần sau dùng cache.</p>
+<button id="listen">Nghe dịch trễ trong lúc xem</button><p class="hint">Giọng dịch đến sau hình ảnh; nếu worker chậm, video sẽ tạm dừng để tránh dồn hàng đợi.</p>
+<button id="stop">Dừng thu audio</button><p id="message" role="status"></p><script src="popup.js"></script></body></html>
